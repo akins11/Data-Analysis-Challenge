@@ -1,0 +1,13 @@
+---
+title: "Exploratory Analysis On FIFA 2021"
+author: "Ayomide Akinwande"
+date: "2023-03-16"
+categories: [R, EDA]
+image: "image.jpg"
+---
+
+Coming soon!
+
+```{r}
+
+```

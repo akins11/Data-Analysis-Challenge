@@ -1,0 +1,51 @@
+[
+  {
+    "objectID": "posts/FIFA-21-data-cleaning/index.html",
+    "href": "posts/FIFA-21-data-cleaning/index.html",
+    "title": "FIFA 2021 Data Cleaning In R",
+    "section": "",
+    "text": "One important step in data analysis that can not be overlooked is data cleaning, this ensure that the data is error free, complete, accurate and consistent by identifying and handling missing data, correcting or removing invalid and inconsistent records across the dataset. In doing this you will not only ensure that any insights or decisions made from the data are accurate and reliable, but also improve data storage by reducing the amount of unnecessary or redundant data, which can save storage space and improve processing times.\nIn this tutorial, we will be working with the FIFA-2021 data of different players around the world. This dataset contains information that can help us gain several insights about the demographics and attributes of professional football players However, like many other real-world datasets, it is messy and contains errors, inconsistencies, and missing data. Today we will clean and prepare the data for future analysis using several data cleaning techniques."
+  },
+  {
+    "objectID": "posts/FIFA-21-data-cleaning/index.html#summary",
+    "href": "posts/FIFA-21-data-cleaning/index.html#summary",
+    "title": "FIFA 2021 Data Cleaning In R",
+    "section": "Summary",
+    "text": "Summary\nNow that we have our cleaned data, Here is a brief highlight of the steps taken to clean the data.\n* Loading the data: We imported the data set using the read_csv() function.\n* Column names: All column name were converted to lower case with an underscore.\n* Variable cleaning: Separated the contract variable, change the loan end date and start date of each player’s national career to a date data type, remove additional characters from the height and weight column, converted players name and country to all english character, also removed symbols and escape characters from the ratings and hits column.\n* Position table: Created a new table with each player id and field positions.\n* Data validation: Validated all other variables for completeness and consistency.\n* Data quality check: Verified all data types for each column.\n* Saving the data: Saved both the cleaned data and the new position table in a .csv file."
+  },
+  {
+    "objectID": "posts/FIFA-21-data-cleaning/index.html#conclusion",
+    "href": "posts/FIFA-21-data-cleaning/index.html#conclusion",
+    "title": "FIFA 2021 Data Cleaning In R",
+    "section": "Conclusion",
+    "text": "Conclusion\nThe primary goal of data cleaning is to improve the quality and accuracy of the data so that it can be useful for analysis and decision-making. Data cleaning is also a critical step in the data analysis/science process and cannot be ignored or overlooked when working with data. With the data cleaned, we can proceed into data exploration, visualization, preprocessing, etc."
+  },
+  {
+    "objectID": "about.html",
+    "href": "about.html",
+    "title": "About",
+    "section": "",
+    "text": "About this blog"
+  },
+  {
+    "objectID": "posts/exploratory-analysis/index.html",
+    "href": "posts/exploratory-analysis/index.html",
+    "title": "Exploratory Analysis On FIFA 2021",
+    "section": "",
+    "text": "Coming soon!"
+  },
+  {
+    "objectID": "posts/welcome/index.html",
+    "href": "posts/welcome/index.html",
+    "title": "Welcome To My Blog",
+    "section": "",
+    "text": "This is the first post in a Quarto blog. Welcome!\n\nSince this post doesn’t specify an explicit image, the first image in the post will be used in the listing page of posts."
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Data Analysis Challenge",
+    "section": "",
+    "text": "Exploratory Analysis On FIFA 2021\n\n\n\n\n\n\n\nR\n\n\nEDA\n\n\n\n\n\n\n\n\n\n\n\nMar 16, 2023\n\n\nAyomide Akinwande\n\n\n\n\n\n\n  \n\n\n\n\nFIFA 2021 Data Cleaning In R\n\n\n\n\n\n\n\nR\n\n\ndata cleaning\n\n\n\n\n\n\n\n\n\n\n\nMar 16, 2023\n\n\nAyomide Akinwande\n\n\n\n\n\n\n  \n\n\n\n\nWelcome To My Blog\n\n\n\n\n\n\n\nnews\n\n\n\n\n\n\n\n\n\n\n\nMar 13, 2023\n\n\nTristan O’Malley\n\n\n\n\n\n\nNo matching items"
+  }
+]

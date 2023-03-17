@@ -1,0 +1,14 @@
+{
+  "hash": "bbc83ebba30bc21515c121c31809cb1f",
+  "result": {
+    "markdown": "---\ntitle: \"Exploratory Analysis On FIFA 2021\"\nauthor: \"Ayomide Akinwande\"\ndate: \"2023-03-16\"\ncategories: [R, EDA]\nimage: \"image.jpg\"\n---\n\n\nComing soon!\n\n\n::: {.cell}\n\n:::\n",
+    "supporting": [],
+    "filters": [
+      "rmarkdown/pagebreak.lua"
+    ],
+    "includes": {},
+    "engineDependencies": {},
+    "preserve": {},
+    "postProcess": true
+  }
+}

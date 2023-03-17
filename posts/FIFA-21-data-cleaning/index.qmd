@@ -1,0 +1,721 @@
+---
+title: "FIFA 2021 Data Cleaning In R"
+author: "Ayomide Akinwande"
+date: "2023-03-16"
+categories: [R, data cleaning]
+---
+
+![](data-cleaning-image.jpg)
+
+One important step in data analysis that can not be overlooked is data cleaning, this ensure that the data is error free, complete, accurate and consistent by identifying and handling missing data, correcting or removing invalid and inconsistent records across the dataset. In doing this you will not only ensure that any insights or decisions made from the data are accurate and reliable, but also improve data storage by reducing the amount of unnecessary or redundant data, which can save storage space and improve processing times.  
+  
+In this tutorial, we will be working with the FIFA-2021 data of different players around the world. This dataset contains information that can help us gain several insights about the demographics and attributes of professional football players However, like many other real-world datasets, it is messy and contains errors, inconsistencies, and missing data. Today we will clean and prepare the data for future analysis using several data cleaning techniques.
+
+
+
+### Libraries
+We will be using the some of the core tidyverse packages such as readr, tidyr, dplyr and stringr, as well as some additional packages that will help us with specific data cleaning tasks. install the following package if you don't already have them.
+```{r}
+#| eval: false
+install.packages("tidyverse")
+install.packages("janitor")
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+#| error: false
+library(tidyverse)
+library(stringi)
+library(janitor)
+library(lubridate)
+
+library(gt)
+```
+
+
+### Data Loading
+Next we will load in the FIFA-21 dataset. you can download the data following this [link](https://www.kaggle.com/datasets/yagunnersya/fifa-21-messy-raw-dataset-for-cleaning-exploring) and store it in a folder called data in your current working directory.
+
+```{r}
+raw_data <- read_csv("data/fifa21 raw data v2.csv")
+
+head(raw_data)
+```
+
+
+
+### Data Cleaning
+
+#### Name
+Before we proceed further, some of the variable name contain spaces and different letter case which can be challenging when handling them through out the cleaning process, so i will transform the names by setting them to lower case and replace any space with an underscore '_' using the `clean_names()` function from the janitor package.
+
+```{r}
+edit_raw <- clean_names(raw_data)
+
+colnames(edit_raw)
+```
+
+
+
+#### Club
+The `club` variable represent the current club in which the player have a contract with as of the year 2021.
+
+```{r}
+select(edit_raw, club)
+```
+
+If you notice the column have some  "\\n" special character which is also called an escape sequence, it represents a new line character and is used to insert a line break in a string, we don't need this here so we will remove them. some other things you might have missed are:
+
+> There are some players without a current contract.
+
+> Some records contain non-English characters such as é, ü, ş.
+
+First, We will remove the "\\n" character then convert non-English characters or special characters into their closest English equivalents using the `stri_trans_general()` function from the stringi package, this process is called transliteration.
+
+```{r}
+edit_raw <- edit_raw |>
+  mutate(club = str_remove_all(club, "\\n") |> stri_trans_general("Latin-ASCII")) 
+
+select(edit_raw, club) |> head(5) |> gt()
+```
+
+###### Check
+It is a good practice to check for any misrepresentation of the data after making some changes in them. So we will verify if there are `NA` values.
+
+```{r}
+edit_raw |> filter(is.na(club)) |> select(club)
+```
+
+Great! no missing values, so all club names with special character have been transformed successfully.
+
+
+#### Contract
+This column contains the information about the year in which the players contract with their current club started and the year the contract will or is supposed to end.
+
+```{r}
+select(edit_raw, contract)
+```
+
+It is important that the two different information above should be in their respective column. This provide a clear and consistent record, there by making it easy to perform both simple and complex analysis using them.  
+To restructure the contract variable, we need to separate each of the identified variable into a `start_year` and `end_year` column. Before we do that, here are some observations we should keep in mind:
+
+> Players with no current club are considered free agents and are with no contract start year and end year.
+
+```{r}
+edit_raw |> filter(club == "No Club") |> select(club, contract)
+```
+
+
+> Note that when a player is on loan, no contract start year was specified.
+
+```{r}
+edit_raw |> 
+  filter(str_detect(contract, "Loan")) |> 
+  select(club, contract, loan_date_end)
+```
+
+
+> Also, all contract records do not have the same contract start year and end year in number, some are in both words and number dates, mostly for players on loan.
+
+
+The contract start year and end year will be separated using a the tilde ~ character and the `separate()` function from tidyr package.
+
+```{r}
+edit_raw <- edit_raw |>
+  separate(col = contract, 
+           into = c("start_year", "end_year"), 
+           sep = " ~ ",
+           extra = "merge",
+           remove = FALSE)
+
+select(edit_raw, contract, start_year, end_year) |> head(5) |> gt()
+```
+
+There is a warning message which state that rows in which the expression "~" given to the `sep` argument can not be used to separate the values. let us view some of this rows.
+
+```{r}
+edit_raw |>
+  select(club, contract, start_year, end_year) |>
+  slice(206, 249, 255, 290, 293, 303, 307, 333, 337, 370, 375, 376)
+```
+
+
+If you remember earlier when some observation of the contract column were put in place, some of the records have their date stated in words such as `Free` (majorly players with no club), dates in words and number of when the contract began (majorly for players on loan) instead of the start and end year, this is the reason why there are some missing values in the end year because the `separate()` function doesn't know how to separate such record. In order to solve this problem, another variable called `contract_type` will be created which will help in distinguishing between each type of contract allowing the start and end year the freedom of having just the numeric year data type.
+
+```{r}
+edit_raw <- edit_raw |>
+  mutate(
+    # create a categorical variable for the type of contract.
+    contract_type = case_when(str_detect(start_year, "Loan") ~ "Loan",
+                              start_year == "Free" ~ "Free",
+                              TRUE ~ "Permanent"),
+    
+    # send all Loan end year from the contract start year to the end year.     
+    end_year = case_when(str_detect(start_year, "Loan") ~ str_extract(start_year, "\\d{4}"),
+                         TRUE ~ end_year),
+    
+    # convert all start_year records with `Free` and `Loan` to NA
+    start_year = case_when(contract == "Free" ~ NA_character_, 
+                           str_detect(start_year, "Loan") ~ NA_character_,
+                           TRUE ~ start_year)
+  ) |>
+  # convert start and end year to a numeric data type.
+  mutate(across(c(start_year, end_year), as.integer))
+
+select(edit_raw, club, contract_type, start_year, end_year) |> head(5) |> gt()
+```
+
+There you have it, the type of contract, the year the contract started and ended all on their own column which create a lot of flexibility when using the variables one at a time or all at the same time.
+
+##### check
+Again we will perform some checks on the new columns created. first let us verify that all players with a permanent contract do not have missing records for the contract start and end year.
+
+```{r}
+edit_raw |> 
+  filter(contract_type == "Permanent" & is.na(start_year) & is.na(end_year)) |> 
+  select(contract_type, start_year, end_year)
+```
+
+Zero row returned great!
+
+Now let us do some checks on the start and end date, ideally the start date should be earlier that the end date.
+
+```{r}
+edit_raw |>
+  mutate(check = start_year <= end_year) |>
+  # condition to return poor records with earlier end year than start year
+  filter(check == FALSE) |>
+  select(start_year, end_year, check)
+```
+
+Great! zero row, what this means is that all contract start year comes before the end year.
+
+
+
+#### Joined national team date and loan contract expiration date.
+Next, some closely related variables to the one above, which includes the date each player `joined` their various national team and also the end date of a player loan contract, if the player was on a loan contract.
+
+```{r}
+select(edit_raw, joined, loan_date_end) |> head(5)
+```
+
+Observation:
+
+> The data type of the `joined` variable is character, given that it is supposed to represented as date variable, it will be converted from a character to a date data type.
+
+```{r}
+edit_raw <- edit_raw |>
+  mutate(joined = mdy(joined),
+         loan_date_end = mdy(loan_date_end)) |>
+  rename(loan_end_date = loan_date_end, joined_national_team = joined)
+
+edit_raw |>
+  filter(contract_type == "Loan") |>
+  select(joined_national_team, loan_end_date) |> 
+  head(5) |>
+  gt()
+```
+
+
+###### Check
+National team date column
+
+```{r}
+edit_raw |> filter(is.na(joined_national_team)) |> select(joined_national_team)
+```
+
+Verify if loan end date have missing value when a player is on loan.
+
+```{r}
+edit_raw |> 
+  select(contract_type, loan_end_date, end_year) |>
+  filter(contract_type == "Loan" & is.na(loan_end_date))
+```
+
+Just in case you didn't notice, the loan contract `end_year` is available in the `loan_end_date` column it will be helpful to compare both value for each player to check if there are inconsistencies.
+
+```{r}
+edit_raw |> 
+  
+  # get the year
+  mutate(loan_end_year = year(loan_end_date)) |>
+  
+  # return columns where the player is on loan and the contract end_year is not  
+  # the same as the year in the loan end date column
+  filter(contract_type == "Loan" & end_year != loan_end_year) |>
+  
+  select(contract_type, end_year, loan_end_year)
+
+```
+
+No missing value or misrepresented value detected.
+
+
+
+#### Value, wage and release clause.
+The `value` variable represent the worth of each player as of the year 2021, the `wages` represent the amount players earn from their respective clubs, while the release clause which is also known as a buyout clause or a buyout option.
+
+```{r}
+select(edit_raw, value, wage, release_clause) |> head()
+```
+
+If we take a closer look at them, these variables are supposed to have numeric data type, they also seem to have similar problem such as:
+
+> A euro sign at the beginning of the value.
+
+> Either a (K) representing value in thousands and (M) in millions.
+
+> The values are collated in a short format i.e 12K instead of 12000.
+
+> Character data type.
+
+To change these variables to the right value and data type the above stated observations will need to be rectified accordingly. All character signs and letter will be dropped and values with K will be converted to thousands in numeric value and M to millions.
+
+```{r}
+#| message: false
+#| warning: false
+#| error: false
+edit_raw <- edit_raw |>
+   mutate(
+     # selecting the columns (value, wage, release_clause) to iterate over.
+     across(c(value, wage, release_clause), function(col) {
+      # convert each variable value to their respective numerical value.
+      case_when(
+        str_detect(col, "M") ~ as.double(str_replace_all(col, "(€|M)", "")) * 1000000,
+        str_detect(col, "K") ~ as.double(str_replace_all(col, "(€|K)", "")) * 1000,
+        TRUE ~ as.double(str_replace(col, "€", ""))
+      )
+    })
+   )
+
+select(edit_raw, value, wage, release_clause) |> head(5) |> gt()
+```
+
+###### Check
+checking for `NA` values.
+
+```{r}
+filter(edit_raw, is.na(value)) |> select(value)
+filter(edit_raw, is.na(wage)) |> select(wage)
+filter(edit_raw, is.na(release_clause)) |> select(release_clause)
+```
+We have no `NA` values in all the columns.
+
+
+
+#### Height & weight
+The height and weight gives the exact physical description of the players, they also have a few problem of their own so let us check them.
+
+```{r}
+select(edit_raw, height, weight)
+
+edit_raw |> filter(str_detect(height, "'")) |> select(height)
+```
+
+Starting with the `height` variable, this was recorded in both centimeter (170cm) and in feet and inches which means that the value "6'2" represent 6 feet and 2 inches. Of course we cant leave it this way, so we will have to convert the height to an appropriate numeric measure.
+I will be using the centimeter as the unit of measurement for players height as it is the most commonly used metric system, it also have other added advantages over feet & inches such as ease of use, compatibility etc.   
+  
+To clean up the height column the all records in feet will be converted to centimeters. To do that the rows in feet & inches will be converted to inches initially then converted to CM. If we want to convert 6'2 to cm then we can use the formula: (6 * 12 + 2) * 2.54  
+Where:  
+
+> 12 inches = 1 foot, this means that any length measured in feet can be converted to inches by multiplying the number of feet by 12.   
+
+> 2.54 cm = 1 inch, so we can convert the height in inches to CM by multiplying the number of inches by 2.54
+
+First we will create a custom function that convert each record height to centimeter. 
+
+```{r}
+convert_to_cm <- function(str) {
+  
+  map(str, function(s) {
+      if (stringr::str_detect(s, "'")) {
+        feet_inches <- stringr::str_split(s, "'")[[1]]
+        
+        feet_inches[2] <- stringr::str_remove(feet_inches[2], "\"") 
+
+        (as.numeric(feet_inches[1]) * 12 + as.numeric(feet_inches[2])) * 2.54
+        
+      } else {
+        s
+      }
+    }) |>
+     unlist()
+  
+}
+
+edit_raw <- edit_raw |>
+  mutate(height = convert_to_cm(height) |> str_remove("cm") |> as.double()) |>
+  rename(height_cm = height)
+
+select(edit_raw, height_cm) |> head(5) |> gt()
+```
+
+##### Check
+
+```{r}
+filter(edit_raw, is.na(height_cm)) |> select(height_cm)
+```
+
+
+Moving to the `weight` variable, the column holds record of weight in both pounds(lbs) and kilograms(kg) to unify the unit of measurement, the weight will be converted to kg for the reason that kilograms is a more common unit of measurement for weight and provides a more precise and standardized measurement compared to lbs.  
+To fix the weight variable, all records in lbs will be converted to kg using the formula:  
+
+> 1 lb = 0.45359237 kg. This means that to convert lbs to kg we will need to multiply the number of pounds by  0.45359237
+
+Again we will create a custom function that help us convert the weights to kilograms.
+
+```{r}
+convert_to_kg <- function(str) {
+  
+  map(str, function(s) {
+    if (stringr::str_detect(s, "lbs")) {
+      
+      lbs <- stringr::str_remove(s, "lbs") |> as.numeric()
+      
+      round(lbs * 0.45359237, 2)
+      
+    } else {
+      s
+    }
+  }) |>
+    unlist()
+}
+
+edit_raw <- edit_raw |>
+  mutate(weight = convert_to_kg(weight) |> str_remove("kg") |> as.double()) |>
+  rename(weight_kg = weight)
+
+select(edit_raw, weight_kg) |> head(5) |> gt()
+```
+
+###### checks
+
+```{r}
+filter(edit_raw, is.na(weight_kg)) |> select(weight_kg)
+```
+
+Great! the height values were correctly converted to centimeters without any error and the weight to numeric representation of the kilogram metric.
+
+
+
+#### Player name
+
+```{r}
+select(edit_raw, long_name, name)
+```
+
+The `long_name` and `name` variable contains non-English characters or special characters 
+so we will use the `stri_trans_general()` function to convert special characters, this is to ensure that the data is in a consistent format that can be easily processed and analyzed.
+
+```{r}
+edit_raw <- edit_raw |> 
+  mutate(across(c(long_name, name), \(n) stri_trans_general(n, "Latin-ASCII")))
+
+select(edit_raw, long_name, name) |> head(5) |> gt()
+```
+
+Some drawbacks that should be noted about transliteration is that, it can lead to loss of important information such as accent marks or diacritical symbols that can change the meaning or pronunciation of a name, it can also be cultural insensitivity. Overall, it is important to carefully consider the potential risks and benefits of removing special characters from people names when cleaning data.
+
+###### Checks
+
+```{r}
+filter(edit_raw, is.na(long_name)) |> select(long_name)
+filter(edit_raw, is.na(name)) |> select(name)
+```
+
+No `NA` which mean the conversion was successful for all records.
+
+
+
+#### Nationality
+
+```{r}
+select(edit_raw, nationality)
+```
+
+The country includes some non-english character which will be converted. also while aiming for consistency across all country names, the `&` ampersand symbol will be replaced with the letter 'and', also the Korea DPR will be updated to Korea DPRK where the 'DPRK' stands for 'Democratic People's Republic of Korea'.
+
+```{r}
+edit_raw <- edit_raw |> 
+  mutate(nationality = stri_trans_general(nationality, "Latin-ASCII"),
+         nationality = str_replace(nationality, "&", "and"),
+         nationality = if_else(nationality == "Korea DPR", "Korea DPRK", nationality))
+
+select(edit_raw, nationality) |> head(5) |> gt()
+```
+
+###### Check
+
+```{r}
+filter(edit_raw, is.na(nationality)) |> select(nationality)
+```
+
+
+
+#### Player functionality rating. 
+The `w/f` column representing player's weak foot rating, `SM` which represent player's skill moves rating and finally `IR` representing the injury rating. these variables are all on a scale of 1-5. Which is to say that they must be a numeric variable with an minimum value of 1 and a maximum value of 5. 
+
+```{r}
+select(edit_raw, w_f, sm, ir)
+```
+
+These variables will be converted to a numeric data type by simply removing the star symbol and changing the data type to integer. 
+
+```{r}
+edit_raw <- edit_raw |>
+  # iterating over each column and extracting only the digit present in them.
+  mutate(across(c(w_f, sm, ir), \(s) str_extract(s, "[:digit:]") |> as.integer())) |>
+  rename(weak_foot = w_f, skill_move = sm, injury_rating = ir)
+
+select(edit_raw, weak_foot, skill_move, injury_rating) |> head(5)  |> gt()
+```
+
+###### Check
+To make sure every value in the three variables above are within 1 to 5 and there are no `NA` value, we will perform a descriptive summary on each of them.
+
+```{r}
+edit_raw |> select(weak_foot, skill_move, injury_rating) |> summary()
+```
+
+Looking at the minimum (Min.) and maximum (Max.) values of each variable, none of them have values below 1 and above 5.
+
+```{r}
+filter(edit_raw, is.na(weak_foot)) |> select(weak_foot)
+filter(edit_raw, is.na(skill_move)) |> select(skill_move)
+filter(edit_raw, is.na(injury_rating)) |> select(injury_rating)
+```
+
+
+
+#### Hit 
+```{r}
+select(edit_raw, hits)
+```
+
+A few problem can be picked out from the `hits` variable. 
+
+
+> Some of the hits are up to 1000 which were formatted into 1K so converting them back to their original numeric representation will be done by multiplying any record with a `K` present in them by 1000.
+
+> There are missing values.
+
+```{r}
+edit_raw <- edit_raw |>
+         # creating a numeric hits column
+  mutate(hit_num = str_replace(hits, "K", "") |> as.double(),
+         
+         # change all 1.1K to 1100 based on the condition that there is a K 
+         # string in the record.
+         hits = case_when(str_detect(hits, "K") ~ as.character(hit_num * 1000),
+                          TRUE ~ hits ) |> as.double()) |>
+  # drop the hit_num column.
+  select(-hit_num) 
+
+
+select(edit_raw, hits) |> head(5) |> gt()
+```
+
+
+
+#### Player positions
+
+The position variable represent all the position a player have played.
+
+```{r}
+select(edit_raw, positions)
+```
+
+Looking at the top 10 rows there are several positions merged into a single variable,
+this violates the first normal form (1NF) in database normalization because each row in a column should contain a single value, not multiple values. To comply with 1NF, the multivalued `positions` variable will be moved into a separate table with a one-to-many relationship between the original FIFA-21 table and the new position table. Some of the major advantages of this technique are reduction of data redundancy, simplified data analysis process and enhanced data flexibility.
+
+```{r}
+#| warning: false
+#| message: false
+player_position <- edit_raw |> 
+  select(id) |>
+  # join the separated positions to with the player id
+  bind_cols(
+    edit_raw$positions |>
+      str_split(" ", simplify = TRUE) |>
+      as_tibble(.name_repair = "universal")
+  ) |>
+  # keep all position value in a single column. 
+  pivot_longer(cols = `...2`:`...4`,    
+               names_to = "num_position", 
+               values_to = "position") |>
+  # remove all empty rows
+  filter(position != "") |>
+  # remove all comma from the position string.
+  mutate(position = str_remove(position, ",")) |>
+  # drop the num_position variable.
+  select(-num_position) 
+```
+
+###### Check
+Check for valid positions abbreviations
+```{r}
+position_dict <- c(
+  "GK" = "Goalkeeper",
+  
+  # Defenders ------------------------------>
+  "CB" = "Central back",
+  "S"  = "Sweeper", 
+  "FB" = "Full back",
+  "LB" = "Left back",
+  "RB" = "Right back",
+  "WB" = "Wing back",
+  "RWB"= "Right wing back",
+  "LWB"= "Left wing back",
+  
+  # Midfielders ---------------------------->
+  "CM" = "Central midfielder",
+  "DM" = "Defensive midfielder",
+  "AM" = "Attacking midfielder",
+  "CAM"= "Centeral attacking midfielder",
+  "CDM"= "Centeral Defensive midfielder",
+  "LM" = "Left midfielder",
+  "RM" = "Right midfielder",
+  "WM" = "Wide midfielder",
+  
+  # Forward -------------------------------->
+  "ST" = "Striker",
+  "SS" = "Second striker",
+  "CF" = "Center forward",
+  "W"  = "Winger",
+  "LW" = "Left winger",
+  "RW" = "Right winger"
+)
+
+
+pos <- player_position |> distinct(position) |> pull()
+
+all(pos %in% names(position_dict))
+```
+
+
+###### Join tables
+You can combine the new position table with the main table using the `left_join()` function from the dplyr package, all you have to pass to the function is the position table and the player id.
+
+```{r}
+edit_raw |> 
+  left_join(player_position, by = "id") |>
+  select(id, long_name, position)
+```
+
+
+
+
+### Data validation
+These columns seem to be in their perfect data type so just a little extra data validity check will be done on them.
+
+#### Age
+The question we need to ask here is whether the age distribution is a representative of the overall football age distribution.
+
+```{r}
+summary(edit_raw$age)
+```
+
+The average is 25 compared to the average age from 2021 edition of the EA Sports FIFA which was around 27-28 years old.
+
+
+#### Variables measured in percentage.
+OVA: Players overall analysis or rate.  
+POT: Players potential.  
+BOV: Best Overall in percentage.  
+
+```{r}
+edit_raw |>
+  select(ova, pot, bov) |>
+  summarise(across(everything(), 
+                   list(min = min, max = max), 
+                   .names = "{.col}_{.fn}"))
+```
+
+All minimum value maximum values are within 0 to 100.
+
+
+#### players rating
+These includes variable such as attacking, crossing, dribbling, etc, they are all supposed to be numeric.
+
+```{r}
+edit_raw |>
+  select(attacking:base_stats, pac:phy) |>
+  map_lgl(is.double) |> all()
+```
+
+Checking for missing values in any of the selected variable.
+
+```{r}
+edit_raw |>
+  select(attacking:base_stats, pac:phy) |>
+  transmute(across(everything(), is.na)) |>
+  summarise(across(everything(), sum)) |>
+  pivot_longer(everything(), names_to = "rating", values_to = "missing") |>
+  filter(missing > 0)
+```
+
+
+#### Attacking & defensive work rate. 
+The rating of players in this segment should only include any of high, medium or low. Any other rating will be considered an incorrect record.
+
+```{r}
+edit_raw |>
+  select(a_w, d_w) |> 
+  names() |>
+  map(\(i) edit_raw |> distinct(.data[[i]]))
+```
+
+
+
+### Data quality check
+```{r}
+edit_raw |> select(where(is.numeric)) |> names()
+edit_raw |> select(where(is.character)) |> names()
+edit_raw |> select(where(is.Date)) |> names()
+```
+
+
+### Arranging the columns
+
+```{r}
+edit_raw <- edit_raw |>
+  select(
+    id, long_name, name, club, contract, contract_type, start_year, 
+    end_year, loan_end_date, joined_national_team, value:release_clause, 
+    nationality, age, weight_kg, height_cm, preferred_foot:best_position, ova, 
+    pot, attacking:hits, positions, player_url, photo_url
+  )
+
+edit_raw |> head(5) |> gt()
+```
+
+
+
+### Saving data
+We can now go ahead and save the clean data in the data directory we created at the start of the tutorial.
+
+```{r}
+#| eval: false
+write_csv(fifa_21, "data/fifa21_clean_data.csv")
+write_csv(player_position, "data/player_position.csv")
+```
+
+You can access the whole data cleaning script from [here](www.github.com).
+
+
+## Summary
+Now that we have our cleaned data, Here is a brief highlight of the steps taken to clean the data.  
+* **Loading the data:** We imported the data set using the `read_csv()` function.  
+* **Column names:** All column name were converted to lower case with an underscore.  
+* **Variable cleaning:** Separated the contract variable, change the loan end date and start date of each player's national career to a date data type, remove additional characters from the height and weight column, converted players name and country to all english character, also removed symbols and escape characters from the ratings and hits column.  
+* **Position table:** Created a new table with each player id and field positions.  
+* **Data validation:** Validated all other variables for completeness and consistency.  
+* **Data quality check:** Verified all data types for each column.  
+* **Saving the data:** Saved both the cleaned data and the new position table in a .csv file.  
+   
+  
+   
+## Conclusion
+The primary goal of data cleaning is to improve the quality and accuracy of the data so that it can be useful for analysis and decision-making. Data cleaning is also a critical step in the data analysis/science process and cannot be ignored or overlooked when working with data. With the data cleaned, we can proceed into data exploration, visualization, preprocessing, etc.
