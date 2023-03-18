@@ -1,19 +1,19 @@
 ---
 title: "About"
-image: profile.jpg
+image: logo.svg
 about:
   template: jolla
   links:
     - icon: twitter
       text: Twitter
-      href: https://twitter.com
+      href: https://twitter.com/Akinwande_ay24?s=09
     - icon: linkedin
       text: LinkedIn
-      href: https://linkedin.com
+      href: https://www.linkedin.com/in/akinwande-ayomide-7bb37a199
     - icon: github
       text: Github
-      href: https://github.com
+      href: https://github.com/akins11/
 
 ---
 
-About this blog
+The data analysis challenge blog is a website dedicated to helping data analysts and data scientists improve their skills in cleaning, exploring, and visualizing data using various tools such as R, Python and SQL. The blog will provides a variety of resources, including tutorials, case studies, and step-by-step guides to help users navigate common challenges in data analysis.
