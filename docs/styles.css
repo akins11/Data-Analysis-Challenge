@@ -1,1 +1,39 @@
 /* css styles */
+
+
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-moz-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    border-radius: 10px;
+    background-color: #C9C9C9;
+    transition: .3s ease;
+}
+::-moz-scrollbar-thumb {
+    border-radius: 10px;
+    background-color: #C9C9C9;
+    transition: .3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    border-radius: 10px;
+    background-color: #BBBBBB;
+}
+::-moz-scrollbar-thumb:hover {
+    border-radius: 10px;
+    background-color: #BBBBBB;
+}
+
+
+.long-table-output {
+  max-height: 900px;
+  overflow-y: scroll;
+}
