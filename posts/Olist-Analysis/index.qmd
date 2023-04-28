@@ -1,0 +1,920 @@
+---
+title: "Historical Analysis of Olist E-Commerce Platform"
+author: "Ayomide Akinwande"
+date: "2023-04-22"
+categories: [R, historical analysis, visualization]
+---
+
+![](olist-store-image.jpeg)
+
+Olist is an e-commerce platform based in Brazil that connect both small and medium sized businesses to customers through a single marketplace. It offers a range of features and services to help sellers grow their businesses, including free online store, integrated shipping and logistics, and access to a large customer base.  
+An historical analysis dating back from September 2016 to October 2018 will be performed to help us gain insight into the performance of the platform. The goal is to identify trends, patterns and relationships that can inform future decision-making and help improve overall performance.
+
+
+## Libraries
+```{r}
+#| message: false
+#| warning: false
+#| error: false
+
+library(tidyverse)
+library(lubridate)
+library(gt)
+library(gtExtras)
+library(rvest)
+```
+
+
+
+## Importing data
+The dataset contains details of more than 90K orders, it include multiple variables such as unique order id, price, payment, status, customer, sellers, review score and so more, grouped into different tables for easy storage and analysis.  
+
+The file for all the needed data for this analysis can be found on [kaggle](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce).
+```{r}
+#| message: false
+#| warning: false
+
+csv_name <- c(
+  "customers", 
+  "order_items", 
+  "order_payments", 
+  "order_reviews", 
+  "orders",
+  "product_category_name",
+  "products",
+  "sellers"
+)
+
+all_datasets <- map(
+  csv_name, \(table) read_csv(glue::glue("data/olist_{table}_dataset.csv"))
+)
+names(all_datasets) <- csv_name
+
+
+orders <- all_datasets$orders
+order_items <- all_datasets$order_items
+order_payment <- all_datasets$order_payments
+products <- all_datasets$products
+product_category_name <- all_datasets$product_category_name
+customers <- all_datasets$customers
+sellers <- all_datasets$sellers
+reviews <- all_datasets$order_reviews
+
+rm(all_datasets)
+```
+
+
+##### Helper functions
+```{r}
+#| code-fold: true
+
+clean_names <- function(data, new_names = NULL) {
+  if (is.null(new_names)) {
+    data |>
+      dplyr::rename_with(
+        \(c) stringr::str_replace_all(c, "_", " ") |> stringr::str_to_title()
+      )
+  } else {
+    
+    names(data) <- new_names
+    
+    return(data)
+  }
+}
+
+interactive_gt <- function(table, sort = FALSE, filter = FALSE) {
+  gt::opt_interactive(
+    table,
+    use_pagination_info = FALSE, 
+    use_sorting = sort,
+    use_filters = filter,
+    pagination_type = "simple"
+  )
+    
+}
+
+unique_sum <- function(var) {
+  unq <- unique(var)
+  
+  if (length(unq) > 1) {
+    sum(unq, na.rm = TRUE)
+    
+  } else {
+    unq
+  }
+}
+
+```
+
+```{r}
+#| code-fold: true
+
+color_line <- "#3B3B3B"
+color_title <- "#5C5C5C"
+color_axis_title <- "#4D4D4D"
+color_highlight <- "#F7F7F7"
+color_bold <- "#888888"
+```
+
+
+## Data Cleaning
+The `product category name` variable will be converted from Portuguese to English, a minor string formatting for the `payment type` variable. Also `customer state` will be transform from the two letter abbreviations to the full names and their respective regions will be added.
+```{r}
+#| code-fold: true
+
+lvls <- product_category_name$product_category_name
+names(lvls) <- product_category_name$product_category_name_english
+
+products <- products |>
+  mutate(
+    product_category_name = as_factor(product_category_name),
+    product_category_name = fct_recode(product_category_name, !!!lvls),
+    product_category_name = str_replace_all(product_category_name, "_", " ") |>
+                            str_to_title()
+  ) 
+
+order_payment <- order_payment |>
+  mutate(payment_type = str_replace(payment_type, "_", " ") |> str_to_title()) 
+
+```
+
+```{r}
+#| code-fold: true
+#| message: false
+
+
+page_html <- read_html("https://brazil-help.com/brazilian_states.htm")
+
+state_name_code <- page_html %>% 
+  html_elements("table") %>% 
+  map(html_table) %>% 
+  .[[28]] %>% 
+  select(X1, X2, X4) %>% 
+  rename(code = X1, name = X2, region = X4) %>% 
+  slice(3:nrow(.)) %>% 
+  mutate(across(name:region, \(x) str_replace_all(x, "\\n", " "))) %>% 
+  mutate(region = case_when(region == "Southeast" ~ "South East",
+                            region == "Northeast" ~ "North East",
+                            .default = region))
+
+name_code <- state_name_code$code
+names(name_code) <- state_name_code$name
+
+region_code <- state_name_code$code
+names(region_code) <- state_name_code$region
+
+customers <- customers |>
+  mutate(customer_state_name = fct_recode(customer_state, !!!name_code),
+         customer_region = fct_recode(customer_state, !!!region_code))
+```
+
+
+
+## Analysis
+In this analysis of Olist e-commerce platform, the aim is to answer several research questions using R programming language, Also various methods such as trend analysis and data visualization, will be used to explore patterns in the order data over the selected period. the result will be presented in tables and charts, providing insights into trends in sales volume and revenue as well as identifying top-selling products.
+
+
+### Revenue
+This is the total amount of money earned by all sellers on the e-commerce platform from sales of products from September 2016 to October 2018. It is a key metric, as it reflects their capacity to generate income and grow over time.
+
+
+#### What was the total revenue generated by Olist, and how has it changed over time?
+What is the trend of Olist's total revenue over time? Specifically, how did Olist's revenue change from 2016 to 2018.
+```{r}
+temp <- orders |>
+  left_join(order_payment, by = "order_id") |>
+  filter(!order_status %in% c("canceled", "unavailable"))
+
+```
+
+##### Total revenue generated by olist
+
+```{r}
+temp |>
+  summarise(total = sum(payment_value, na.rm = TRUE),
+            minimum = min(payment_value, na.rm = TRUE),
+            average = round(mean(payment_value, na.rm = TRUE), 2),
+            maximum = max(payment_value, na.rm = TRUE)) |>
+  add_column(order_purchase_year = "ALL", .before = 1) |>
+  bind_rows(
+    temp |>
+      mutate(order_purchase_year = as.character(year(order_purchase_timestamp))) |> 
+      group_by(order_purchase_year) |>
+      summarise(total = sum(payment_value, na.rm = TRUE),
+                minimum = min(payment_value, na.rm = TRUE),
+                average = round(mean(payment_value, na.rm = TRUE), 2),
+                maximum = max(payment_value, na.rm = TRUE)) 
+  ) |>
+  
+  clean_names() |>
+  gt() |>
+  fmt_number() |>
+  tab_spanner(label = "Revenue", columns = Total:Maximum) |>
+  tab_style(style = cell_fill(color = color_highlight),
+            locations = cells_body(columns = Total)) |>
+  tab_style(style = cell_fill(color = color_highlight),
+            locations =  cells_body(rows = 1)) |>
+  tab_style(style = cell_text(weight = "bold", color = "#707070"), 
+            locations = cells_body(`Maximum`, 3))
+  
+```
+
+According to the analysis on revenue data of Olist, `a total revenue of 15,739,137` was generated during the period from September 2016 to October 2018. It is worth noting that 2018 was the year with the highest total revenue generated, even though the available dataset contained 10 months in total. On the other hand, 2016 only had 4 months and generated the lowest revenue as expected. Furthermore, `the average revenue by order is 153.44`, indicating a consistent revenue generation pattern in terms of order volume. `The highest single revenue was generated in 2017`, which is a noteworthy finding that may suggest a particular factor or event that contributed to the peak revenue in that year. Finally, we observed that the average revenue generated in 2018 is closer to the overall average revenue, implying a relatively stable revenue generation pattern. These findings provide valuable insights into the historical revenue performance of Olist.
+
+
+##### How did it change over time.
+```{r}
+#| out-width: 100%
+
+temp |>
+  mutate(order_purchase_date = date(order_purchase_timestamp)) |>
+  group_by(order_purchase_date) |>
+  summarise(revenue = sum(payment_value, na.rm = TRUE)) |> 
+  
+  ggplot(aes(x = order_purchase_date, y = revenue)) +
+  geom_line(color = color_line) +
+  labs(x = "Order Purchase Date", 
+       y = "Revenue", 
+       title = "Revenue Generated (Sep 2016 - Oct 2018)") +
+  scale_y_continuous(labels = scales::comma_format()) +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 12),
+        axis.title = element_text(color = color_axis_title, size = 9))
+```
+
+After examining the revenue trend chart for the selected years, we can see that the revenue generated by Olist `was relatively low in 2016 and declined towards the end of the year`. In contrast, revenue increased in the following years, with a peak in 2017. `The highest amount of revenue was generated on November 24, 2017, amounting to 178,450`. It is interesting to note that revenue generated over time are volatile, especially in 2018. This may suggest that certain factors, such as changes in the market or customer behavior, may have influenced revenue performance during this period. Overall, our analysis suggests that the revenue generated by Olist has shown some fluctuations.
+
+
+##### By year
+```{r}
+#| message: false
+#| warning: false
+#| out-width: 100%
+
+temp |>
+  mutate(order_purchase_year = year(order_purchase_timestamp),
+         order_purchase_date = date(order_purchase_timestamp)) |>
+  group_by(order_purchase_date, order_purchase_year) |>
+  summarise(revenue = sum(payment_value, na.rm = TRUE)) |>
+  
+  ggplot(aes(x = order_purchase_date, y = revenue)) +
+  geom_line(color = color_line, show.legend = FALSE) +
+  labs(x = NULL, y = NULL, title = "Revenue Generated by Year Period") +
+  facet_wrap(vars(order_purchase_year), ncol = 1, scales = "free") +
+  scale_y_continuous(labels = scales::comma_format()) +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 12),
+        axis.title = element_text(color = color_axis_title, size = 9),
+        axis.text = element_text(size = 8))
+```
+
+Based on the trend of revenue by year. First, we observed that `revenue generated in 2016 fell below 9,000 and reached its peak in October`, with a slight dip towards the end of the year. Similarly, `in 2017, revenue mostly fell below 50,000`, except in November when it reached its highest peak. After November, there was a minor consistent drop in revenue. This suggests that Olist experienced a surge in sales during the holiday season in November, but struggled to maintain that momentum in the following months.
+
+Second, we noticed that `in 2018, Olist's revenue became more volatile than in the previous years`, with the most significant decline in revenue occurring after its highest peak in May-June and also August-September. This volatility could be attributed to changes in market conditions or customer behavior, which could have affected the platform's revenue generation. It is worth noting that despite the fluctuations, the overall trend showed a relatively stable revenue generation pattern.
+
+Finally, a common discovery was that revenue generally declined in December in both 2016 and 2017. This could be attributed to the fact that December is typically a slow month for seller on Olist due to the holiday season, as people focus on holiday preparations and travel rather than shopping. Overall, these findings provide valuable insights into the historical revenue performance of Olist.
+
+
+### Products
+Analysis of the various products and their categories listed by several sellers on Olist.
+
+
+#### What are the most popular product categories on Olist, and how do their sales volumes compare to each other?
+```{r}
+#| message: false
+#| warning: false
+
+orders |>
+  left_join(order_payment, by = "order_id") |>
+  left_join(select(order_items, order_id, product_id), by = "order_id") |>
+  left_join(products, by = "product_id") |>
+  filter(!order_status %in% c("canceled", "unavailable")) |>
+  distinct() |>
+  
+  group_by(product_category_name) |>
+  summarise(number_order = n_distinct(order_id),
+            total_sales = sum(payment_value, na.rm = TRUE)) |>
+  mutate(product_category_name = case_when(is.na(product_category_name) ~ "`No Category`",
+                                           .default = product_category_name),
+         percent_order = round(proportions(number_order)*100, 2),
+         percent_revenue = round(proportions(total_sales)*100, 2)) |>
+  select(product_category_name, 
+         number_order, 
+         percent_order, 
+         total_sales, 
+         percent_revenue) |>
+  arrange(desc(total_sales)) |> 
+  
+  clean_names(c("Product Category", 
+                "No. order", 
+                "No. order(%)",
+                "Total Sales",
+                "Sales(%)")) |>
+  gt() |>
+  fmt_integer(columns = `No. order`) |>
+  fmt_number(columns = `Total Sales`) |>
+  tab_style(style = cell_text(color = color_bold, weight = "bold"),
+            locations = cells_body(columns = c(`No. order`, `Total Sales`))) |>
+  interactive_gt(filter = TRUE)
+
+```
+
+The analysis of the product data revealed several interesting insights. First, we observed that the most purchased product category on the platform is `Health Beauty`, with a total of 8,800 purchases. This indicates that Olist's customers tend to prioritize health beauty essentials when shopping on the platform. 
+
+Second, the other top five product categories range from Bed Bath Table to computer accessories, with a combined total of 38.5% of all purchased products. This suggests that Olist's customers have diverse interests and preferences when it comes to shopping for products on the platform.
+
+Finally, we noticed that `Computers Accessories` generated more sales in total than `Furniture Decor`, and together the top 5 product category make up 39.6% of the total sales generated. This indicates that Olist's customers are willing to spend more on technology and Leisure items, which is useful information for sellers looking to sell similar products on the platform. 
+
+
+
+#### What is the average order value (AOV) on Olist, and how does this vary by product category?
+
+##### The Average Order Value
+The `average order value` is the average amount of money that customers spend on a single transaction or order.
+```{r}
+order_payment |>
+  summarise(total_revenue = sum(payment_value, na.rm = TRUE),
+            number_of_orders = n_distinct(order_id),
+            average_order_value = total_revenue / number_of_orders) |>
+  clean_names() |>
+  gt() |>
+  fmt_number(decimals = 1) |>
+  fmt_integer(columns = `Number Of Orders`) |>
+  tab_style(style = css("text-align" = "center"),
+            locations = cells_body()) |>
+  tab_style(style = cell_text(color = color_bold, weight = "bold"),
+            locations = cells_body(columns = `Average Order Value`)) 
+```
+  
+Based on the average order summary table presented, it can be observed that `out of the 99,440 unique orders made, the overall average order value was 161.0`. This means that the average order value for each purchase made on the Olist e-commerce platform for the stipulated time period was 161.0. This value is a useful metric for understanding the average amount of money customers are spending on each order. It could also be used as a benchmark for comparing the performance of Olist to other e-commerce platforms during that period, or for tracking changes in customer spending. 
+
+
+##### Average order value by products
+```{r}
+#| message: false
+#| warning: false
+
+orders |>
+  left_join(order_payment, by = "order_id") |>
+  left_join(select(order_items, order_id, product_id), by = "order_id") |>
+  left_join(products, by = "product_id") |>
+  distinct() |>
+  
+  group_by(product_category_name) |>
+  summarise(total_revenue = sum(payment_value, na.rm = TRUE),
+            number_of_orders = n_distinct(order_id),
+            average_order_value = total_revenue / number_of_orders) |>
+  arrange(desc(average_order_value)) |>
+  
+  clean_names() |>
+  gt() |>
+  fmt_number(decimals = 1) |>
+  fmt_integer(columns = `Number Of Orders`) |>
+  cols_label(`Product Category Name` = "Product Category",
+             `Number Of Orders` = md("*No.* Orders")) |>
+  tab_style(style = cell_fill(color = color_highlight),
+            locations = cells_body(columns = `Average Order Value`)) |>
+  interactive_gt(filter = TRUE)
+```
+
+The analysis of average order value by product category reveals that the top 5 product categories with the highest average order value are primarily technology, home appliances, and agricultural tools. This implies that customers are willing to spend more on these categories compared to other categories. With an `average order value of 655.`, these categories are clearly some of the most valuable in terms of generating revenue.   
+It is also possible that sellers on Olist implemented marketing strategies to increase customer spending in these categories.
+
+
+
+#### What where the top-selling products on Olist, and how have their sales trends changed over time?
+
+##### Top selling product
+```{r}
+temp <- orders |>
+  left_join(order_payment, by = "order_id") |>
+  left_join(order_items, by = "order_id", relationship = "many-to-many") |>
+  left_join(products, by = "product_id") |>
+  
+  filter(!order_status %in% c("canceled", "unavailable")) |>
+  group_by(product_id) |>
+  summarise(number_of_order = n_distinct(order_id),
+            total_sales = unique_sum(payment_value)) |>
+  mutate(product_id_label = str_trunc(product_id, width = 12),
+         percentage = proportions(total_sales)*100) |>
+  slice_max(order_by = total_sales, n = 10)
+```
+
+
+```{r}
+#| out-width: 100%
+
+ggplot(temp, aes(x = total_sales, y = fct_reorder(product_id_label, total_sales))) +
+  geom_col(fill = "#ABABAB") +
+  geom_text(aes(label = number_of_order), hjust = 1.2, color = "#333333") +
+  labs(x = "Total Revenue", 
+       y = "Product Id", 
+       title = "Top 10 Best Selling Products",
+       subtitle = "and Unique Purchase(In text)") +
+  scale_x_continuous(labels = scales::comma_format()) +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 12),
+        plot.subtitle = element_text(color = "#777777", size = 10),
+        axis.title = element_text(color = color_axis_title, size = 9))
+```
+
+The bar chart above for the top 10 highest selling products shows that the `highest sales made of any product is 38,803`. The top 10 products have an average sales of 25,064, indicating a relatively high level of demand for these products. It is also interesting to note that the number of unique purchases for these products ranges from 19 to 466, suggesting that the products appeal to a diverse group of consumers. Despite the high sales figures, it is worth noting that the total sales of` the top 10 products make up just 1.83% of all sales generated from 32,730 unique products`. This suggests that there is a diverse range of products being sold on the Olist platform and that no single product dominates the market. Overall, this provide insights into consumer behavior and preferences on the Olist platform.
+
+
+##### Sales trend over time
+```{r}
+#| message: false
+#| warning: false
+#| out-width: 100%
+
+orders |>
+  left_join(order_payment, by = "order_id") |>
+  left_join(order_items, by = "order_id") |>
+  left_join(products, by = "product_id") |>
+  filter(!order_status %in% c("canceled", "unavailable"),
+         product_id %in% temp$product_id) |>
+  
+  group_by(order_purchase_timestamp, product_id) |>
+  summarise(total_sales = unique_sum(payment_value)) |>
+  ungroup() |>
+  filter(product_id != "5769ef0a239114ac3a854af00df129e4") |>
+  
+  ggplot(aes(x = order_purchase_timestamp,
+             y = total_sales,
+             group = 1)) +
+  geom_line(show.legend = FALSE) +
+  facet_wrap(facets = vars(product_id), ncol = 2, scales = "free_y") +
+  labs(x = "Purchase Date", 
+       y = "revenue", 
+       title = "Top Product Sales Over Time") +
+  scale_y_continuous(labels = scales::comma_format()) +
+  theme_minimal() +
+  theme(plot.title = element_text(colour = color_title, size = 11),
+        axis.title = element_text(colour = color_axis_title, size = 8),
+        axis.text = element_text(size = 8))
+```
+
+The above trend plot on sales across the stipulated period provides valuable insights into the sales patterns of the top 10 products. One noticeable observation is the `presence of both high and low variability in sales across the products`. Some products experienced significant fluctuations in sales over time, while others had more stable sales patterns. Another important point to note is that the frequency of purchase varies significantly across the top 10 products. Some products were purchased only a few times over the period, while others were purchased across many periods. Additionally, all products were purchased from 2017 upwards. Overall, the trend plot provides a useful summary of sales patterns over time  for the top 10 products.
+
+
+
+### Orders
+
+
+#### How many orders were placed on Olist, and how does this vary by month or season?
+```{r}
+temp <- orders |> 
+  mutate(order_day = day(order_purchase_timestamp),
+         order_month = month(order_purchase_timestamp, label= TRUE, abbr= TRUE),
+         order_year = year(order_purchase_timestamp),
+         order_date = date(order_purchase_timestamp))
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| out-width: 100%
+
+temp |>
+  group_by(order_day, order_year) |>
+  summarise(number_of_orders = n()) |> 
+  
+  ggplot(aes(x = order_day, 
+             y = number_of_orders, 
+             group = 1)) +
+  geom_line(color = color_line, show.legend = FALSE) +
+  facet_wrap(vars(order_year), ncol = 1, scales = "free_y") +
+  labs(x = "Days of the Month",
+       y = "No. Orders",
+       title = "Number Of Orders in Each Day") +
+  scale_y_continuous(labels = scales::comma_format()) +
+  scale_x_continuous(breaks = seq(1, 31, 2)) +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 12),
+        axis.title = element_text(color = color_axis_title, size = 9))
+```
+
+The plot above provides insight into the number of orders placed on Olist platform over the years. From the plot, it is clear that there was a low number of orders in 2016 compared to the subsequent years. `In 2017, the average number of orders per day was 1,455`, with the highest number of orders occurring on the 24th day. The trend for 2018 was slightly different, with an average number of orders per day of 1,742. The most orders on a particular day in 2018 happened on the 16th day, after which the number of orders steadily declined down to the 31st day. These trends in the number of orders over time provides useful insights to Olist platform in terms of past demands and planning for inventory management.
+
+
+##### By month
+```{r}
+#| message: false
+#| warning: false
+#| out-width: 100%
+
+temp |>
+  group_by(order_month, order_year) |>
+  summarise(number_of_orders = n()) |>
+  
+  ggplot(aes(x = order_month, 
+             y = number_of_orders, 
+             group = 1)) +
+  geom_line(color = color_line, show.legend = FALSE) +
+  facet_wrap(vars(order_year), ncol = 1, scales = "free_y") +
+  labs(x = NULL,
+       y = "No. Orders",
+       title = "Orders Volume by Month") +
+  scale_y_continuous(labels = scales::comma_format()) +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 12),
+        axis.title = element_text(color = color_axis_title, size = 9))
+```
+
+The analysis of the total number of orders made in each month across all years shows an interesting trend. There was a steady increase in the total number of orders made in 2017 except for some months such as April, June, and December when the number of orders declined. This could be attributed to seasonal factors, as December is typically a month where people are focused on holiday preparations and less on making purchases. In contrast, 2018 saw a steep decline in the total number of orders from April to September, with the biggest decline happening from August to September where there was a difference of 6,496 orders. This significant decline suggests that there might have been external factors that affected customer behavior during this period. It could be worthwhile to investigate if there was any significant event or change that happened during that time that could have influenced customer purchase behavior.
+
+
+##### By date
+```{r}
+#| message: false
+#| warning: false
+#| out-width: 100%
+
+temp |>
+  group_by(order_date, order_year) |>
+  summarise(number_of_orders = n()) |>
+  
+  ggplot(aes(x = order_date, 
+             y = number_of_orders, 
+             group = 1)) +
+  geom_line(color = color_line, show.legend = FALSE) +
+  facet_wrap(vars(order_year), ncol = 1, scales = "free") +
+  labs(x = "Order Date", 
+       y = "No. Order",
+       title = "Orders Volume") +
+  scale_y_continuous(labels = scales::comma_format()) +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 12),
+        axis.title = element_text(color = color_axis_title, size = 9),
+        axis.text.x = element_text(size = 8))
+```
+
+The plot on total orders across each year shows a similar trend to that of the total amount of sales generated. Just like the amount of sales, the total number of orders also exhibits a seasonal trend. There was a significant increase in orders in the last quarter of 2017, with the peak occurring in November from 23rd to 29th. The highest number of orders for this period was recorded on the 24th, which was the Black Friday sales day. However, this peak period was relatively short-lived, and the number of orders declined sharply after that week. The trend for 2018 was also similar, with a high number of orders in the second and third quarter, followed by a significant decline from August to October. This volatility is consistent with the trend observed for the total amount of sales during the stipulated period, suggesting that the number of orders is a good indicator of sales performance for the Olist e-commerce platform.
+
+
+
+#### What is the average order cancellation rate on Olist, and how does this impact seller performance?.
+
+Before running the analysis for the average rate of order cancellation, a summary of the distribution of order status can provide more insight into the number of orders.
+```{r}
+orders |>
+  count(order_status, sort = TRUE, name = "number_of_order") |>
+  mutate(percentage = proportions(number_of_order)*100,
+         order_status = str_to_title(order_status)) |>
+  
+  clean_names() |>
+  gt(rowname_col = "Order Status") |>
+  fmt_number(columns = `Number Of Order`, decimals = 0) |>
+  fmt_number(columns = Percentage) |>
+  cols_label(`Number Of Order` = md("*No.* Order"))
+```
+
+Based on the order status summary, it appears that the majority of orders (97%) were delivered successfully to customers. This suggests that the company has a strong delivery process in place, which is crucial for customer satisfaction and loyalty. However, it is worth noting that a small percentage of orders (0.63%) were canceled, which could be due to various reasons such as stock unavailability or customer requests. Additionally, 0.61% of orders were unavailable, which could indicate that there where some flaws in inventory management system that prevented the availability of products for customers to purchase.
+
+
+```{r}
+#| message: false
+#| warning: false
+
+orders |>
+  left_join(order_items, by = "order_id") |>
+  left_join(sellers, by = "seller_id") |>
+  left_join(order_payment, by = "order_id") |>
+  distinct() |>
+
+  group_by(seller_id, order_status) |>
+  summarise(count = n(),
+            average_revenue = mean(payment_value, na.rm = TRUE)) |>
+  mutate(percentage_of_seller_order = proportions(count)*100,
+         seller_id = if_else(is.na(seller_id), "No Sellers", seller_id),
+         seller_id = str_trunc(seller_id, width = 15)) |>
+
+  filter(order_status == "canceled") |> 
+  ungroup() |>
+  arrange(desc(count)) |> 
+  rename(number_of_canceled = count) |>
+  select(-order_status)  |>
+  
+  clean_names() |>
+  gt() |>
+  fmt_number(columns = c(`Average Revenue`, `Percentage Of Seller Order`)) |>
+  cols_label(`Number Of Canceled` = md("*No.* Canceled")) |>
+  interactive_gt()
+```
+
+The summary table on sellers' average cancellation rate provides insightful information on the performance of the sellers on the Olist platform. It shows that `sellers with canceled orders have an average cancellation rate of 22.3%`. However, it is noteworthy that the majority of sellers on the platform do not have any canceled orders, and their sales generate an average of 224 with a median of 132. On the other hand, sellers with canceled orders generate an average of 220 with a median of 115. This indicates that while canceled orders can affect a seller's reputation, it may not necessarily lead to a significant drop in sales.
+
+
+#### Which payment methods are most commonly used by Olist customers, and how does this vary by product category or geographic region?
+
+##### The most used payment method
+```{r}
+orders |>
+  left_join(order_payment, by = "order_id") |>
+  mutate(payment_type = if_else(is.na(payment_type), "Not Defined", payment_type)) |>
+  count(payment_type, sort = TRUE, name = "Count") |>
+  mutate(percentage = proportions(Count)*100) |>
+  
+  clean_names(c("Payment Method", "Number of Order", "Percentage")) |>
+  gt() |>
+  fmt_integer() |>
+  fmt_number(columns = Percentage) |>
+  tab_style(style = cell_text(color = color_bold, weight = "bold"),
+            locations = cells_body(columns = `Number of Order`))
+```
+
+Based on the summary of orders by payment method, it is clear that `the credit card payment option is the most popular payment method for customers. It accounts for about 73.92% of all orders`. This could be because credit cards were widely accepted, easy to use and offer customers the convenience of making payments. On the other hand, the use of debit cards for payments is relatively low, accounting for just 1.47% of all orders. This could be because some customers prefer credit cards, or it could be due to the limited use of debit cards in certain regions. Nonetheless, the analysis shows that credit card payments are the preferred payment method for customers.
+
+
+##### By product category
+::: {.long-table-output}
+```{r}
+#| message: false
+#| warning: false
+
+orders |>
+  left_join(order_payment, by = "order_id") |>
+  left_join(order_items, by = "order_id") |>
+  left_join(products, by = "product_id") |>
+  distinct() |>
+  
+  group_by(product_category_name, payment_type) |>
+  summarise(count = n_distinct(order_id)) |>
+  arrange(desc(count), product_category_name, desc(count)) |>
+  mutate(prop_payment_type = proportions(count)*100,
+         payment_type = if_else(is.na(payment_type), "No Specified Method", payment_type)) |>
+  
+  clean_names(c("c", "Payment Method", "Orders", "(%) by Payment Method")) |>
+  gt() |>
+  fmt_integer(columns = Orders) |>
+  fmt_number(columns = `(%) by Payment Method`) |>
+  tab_options(column_labels.font.size = 15,
+              column_labels.font.weight = "bold",
+              row_group.background.color = "#FAFAFA",
+              row_group.font.size = 13)
+```
+
+:::
+Based on the table, it is clear that `credit card` payment is the most preferred payment method for customers across all product categories. The data shows that `credit card had an average of 73% of all purchases for each product category`. Boleto, voucher and debit card payment options follow credit card payment in that order of preference. This trend is observed across almost all product categories, as the preference for payment options remains relatively consistent.
+
+```{r}
+#| message: false
+#| warning: false
+
+temp <- orders |>
+  left_join(order_payment, by = "order_id") |>
+  left_join(order_items, by = "order_id") |>
+  left_join(customers, by = "customer_id") |>
+  distinct()
+```
+
+
+
+##### By geographic region
+::: {.long-table-output}
+```{r}
+#| message: false
+#| warning: false
+
+temp |>
+  group_by(customer_state_name, payment_type) |>
+  summarise(count = n_distinct(order_id)) |>
+  arrange(desc(count), customer_state_name, desc(count)) |>
+  mutate(prop_payment_type = proportions(count)*100,
+         payment_type = if_else(is.na(payment_type), "No Specified Method", payment_type)) |>
+  
+  clean_names(c("c", "Payment Method", "Orders", "(%) by Paymant Method")) |>
+  gt() |>
+  fmt_integer(columns = Orders) |>
+  fmt_number(columns = `(%) by Paymant Method`) |>
+  tab_options(column_labels.font.size = 15,
+              column_labels.font.weight = "bold",
+              row_group.background.color = "#FAFAFA",
+              row_group.font.size = 13)
+```
+::: 
+
+```{r}
+#| message: false
+#| warning: false
+
+temp |>
+  group_by(customer_region, payment_type) |>
+  summarise(count = n_distinct(order_id)) |>
+  arrange(desc(count), customer_region, desc(count)) |>
+  mutate(prop_payment_type = proportions(count)*100,
+         payment_type = if_else(is.na(payment_type), "No Specified Method", payment_type)) |>
+  
+  clean_names(c("c", "Payment Method", "Orders", "(%) by Paymant Method")) |>
+  gt() |>
+  fmt_integer(columns = Orders) |>
+  fmt_number(columns = `(%) by Paymant Method`) |>
+  tab_options(column_labels.font.size = 15,
+              column_labels.font.weight = "bold",
+              row_group.background.color = "#FAFAFA",
+              row_group.font.size = 13)
+```
+
+
+### Sellers
+
+#### How many sellers are active on Olist, and how does this number change over time?
+
+##### Active sellers
+```{r}
+sellers |> 
+  summarise(number_of_sellers = n_distinct(seller_id)) |>
+  
+  clean_names() |>
+  gt() |>
+  fmt_integer() |>
+  cols_align(align = "center") |>
+  tab_style(style = cell_text(color = color_bold, weight = "bold"),
+            locations = cells_body())
+```
+
+```{r}
+#| message: false
+#| warning: false
+#| out-width: 100%
+
+orders |> 
+  left_join(select(order_items, order_id, seller_id), by = "order_id") |>
+  left_join(sellers, by = "seller_id") |>
+  distinct() |>
+  
+  mutate(order_date = date(order_purchase_timestamp),
+         order_year = year(order_purchase_timestamp)) |>
+  group_by(order_date, order_year) |>
+  summarise(number_of_sellers = n_distinct(seller_id)) |>
+  
+  ggplot(aes(x = order_date, y = number_of_sellers)) +
+  geom_line(color = color_line) +
+  facet_wrap(vars(order_year), ncol = 1, scales = "free") +
+  labs(x = "Date", 
+       y = "No. Sellers", 
+       title = "Number of Active Sellers on Olist") +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 12),
+        axis.title = element_text(color = color_axis_title, size = 9),
+        axis.text.x = element_text(size = 8))
+```
+
+The trend chart of the number of active sellers on the Olist platform provides valuable insights into the growth and stability of the platform during the analysis period. The chart shows that there has been steady growth in the number of active sellers on the platform from 2016. `The number of active sellers increased from 146 in 2016 to 1,785 in 2017, and then to 2,384 in 2018`. This suggests that the platform has been successful in attracting more sellers to its platform over the years. The chart also reveals that the number of active sellers in 2018 saw more variability than in 2017, which is consistent with the patterns observed in the amount of order and revenue generated during the period.
+
+
+
+#### What is the distribution of customer ratings on Olist, and how does this impact sales performance?
+
+```{r}
+summary(reviews$review_score) |> 
+  as.list() |> 
+  as.data.frame() |>
+  clean_names(c("Minimum", "1st Quarter", "Median", "Mean", "3rd Quarter", "Maximum")) |>
+  gt() |>
+  fmt_number(columns = Mean) |>
+  cols_align(align = "center") 
+```
+
+```{r}
+#| out-width: 100%
+
+ggplot(reviews, aes(x = review_score)) +
+  geom_boxplot() +
+  labs(x = "Score", title = "Review Score Distribution") +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 13),
+        axis.title.x = element_text(color = color_axis_title),
+        axis.text.y = element_blank())
+```
+
+The satisfaction survey is an important tool for businesses to understand how their customers feel about their product or service. The distribution of the satisfaction survey given to customers in the above analysis indicates that a significant number of customers are satisfied with their purchase on the Olist platform. The rating system ranges from 1 to 5 with 5 being the best rating and 1 being the worst. The fact that 75% of customers gave a rating of 4 and above shows that the majority of customers were satisfied with the product and the overall transaction experience. This high satisfaction rating is a good indication that Olist is delivered value to its customers and was meeting their needs.
+
+
+##### Sales performance
+```{r}
+#| message: false
+#| warning: false
+
+orders |>
+  left_join(order_payment, by = "order_id") |>
+  left_join(reviews, by = "order_id") |>
+  
+  group_by(review_score) |>
+  
+  summarise(count = n_distinct(customer_id),
+            minimum = min(payment_value, na.rm = TRUE),
+            median = median(payment_value, na.rm = TRUE),
+            maximum = max(payment_value, na.rm = TRUE),
+            total = unique_sum(payment_value)) |>
+  arrange(desc(review_score)) |>
+  
+  clean_names() |>
+  gt() |>
+  fmt_number() |>
+  fmt_integer(columns = c(`Review Score`, Count)) |>
+  gt_fa_rating(`Review Score`, color = "#000000", icon = "star") |>
+  tab_spanner(label = "Sales", columns = Minimum:Total) |>
+  tab_style(style = cell_fill(color = color_highlight),
+            locations = cells_body(columns = Total))
+```
+
+The sales summary by review score table provides an insightful view of how review scores affect sales. The table shows that orders with higher ratings score of 5 and 4 generated the most sales. This suggests that customers tend to purchase products with high ratings and are more likely to return for future purchases. Additionally, the data reveals that orders with a review score of 1 generated more sales on average and in total than orders with review scores of 2 and 3, even though there were more ratings of 1 than 2 and 3.
+
+
+
+### Customers
+
+#### How many customers have made repeat purchases on Olist, and what percentage of total sales do they account for?
+
+##### Number of returned customers
+```{r}
+orders |>
+  left_join(customers, by = "customer_id") |>
+  
+  group_by(customer_unique_id) |>
+  summarise(count = n_distinct(order_id)) |>
+  mutate(percentage = proportions(count)*100) |>
+  arrange(desc(count)) |>
+  filter(count > 1) |>
+  summarise(total_customers = n_distinct(customer_unique_id),
+            percentage_customer = sum(percentage)) |>
+  
+  clean_names(c("Total Customers", "Percentage of All Customers")) |>
+  gt() |>
+  cols_align("center") |>
+  fmt_integer(columns = `Total Customers`) |>
+  fmt_number(columns = `Percentage of All Customers`) |>
+  tab_style(style = cell_text(color = color_bold, weight = "bold"),
+            location = cells_body(columns = `Percentage of All Customers`))
+```
+
+The table shows that there was a low percentage of repeated purchasers on Olist, with just 6.38% of all customers making more than one order. This could be due to several factors, including the nature of the products being sold, the competitiveness of the market, or the quality of customer service provided by the sellers. 
+
+##### Percentage of total sales
+```{r}
+orders |>
+  left_join(customers, by = "customer_id") |>
+  left_join(order_payment, by = "order_id") |>
+  
+  filter(!order_status %in% c("canceled", "unavailable")) |>
+  group_by(customer_unique_id) |>
+  summarise(number_of_orders = n_distinct(order_id),
+            total_sales = sum(payment_value, na.rm = TRUE)) |>
+  mutate(percentage = (total_sales / sum(total_sales))*100 ) |>
+  filter(number_of_orders > 1) |>
+  summarise(total_sales = sum(total_sales),
+            total_percentage = sum(percentage, na.rm = TRUE)) |>
+  
+  clean_names(c("Total Sales", "Percentage of Total Sales")) |>
+  gt() |>
+  fmt_number() |>
+  cols_align("center") |>
+  tab_style(style = cell_text(color = color_bold, weight = "bold"),
+            location = cells_body(columns = `Percentage of Total Sales`))
+```
+The sales data on Olist platform reveals that a vast majority of the sales, `about 94.34%, came from customers who made their first purchase`. This suggests that Olist should focused on increasing the number of first-time customers to drive sales growth. However, the fact that repeated customers account for only 5.66% of the total sales also highlights the importance of retaining customers. While acquiring new customers is crucial, retaining existing customers can be even more important for building a loyal customer base that generates repeat sales over time. 
+
+
+#### What is the average customer rating for products sold on Olist
+
+```{r}
+#| message: false
+#| warning: false
+#| out-width: 100%
+
+orders |> 
+  left_join(reviews, by = "order_id") |>
+  left_join(order_items, by = "order_id") |>
+  left_join(products, by = "product_id") |>
+  
+  group_by(product_id) |>
+  summarise(avg_rating = median(review_score, na.rm = TRUE)) |>
+  
+  ggplot(aes(x = avg_rating)) +
+  geom_bar(color = "white") +
+  labs(x = "Rating", 
+       y = "Count", 
+       title = "Distribution of Median Rating Score by Product") +
+  scale_y_continuous(labels = scales::comma_format()) +
+  theme_minimal() +
+  theme(plot.title = element_text(color = color_title, size = 12),
+        axis.title = element_text(color = color_axis_title))
+```
+The analysis of the products by review score chart indicates that the majority of products on Olist have high ratings, with over 15,000 products having a perfect rating score of 5. This was a positive sign for both Olist and its seller as it suggests that the majority of products sold on the platform are of good quality and meet the expectations of customers. Additionally, there were very few products with a low rating score of 2, which is a positive sign as well, as it indicates that customers are not frequently receiving poor-quality products.
+
+
+## Insights
+The historical analysis of orders on the Olist platform between June 2016 and October 2018 revealed interesting patterns. 
+1. The analysis shows a steady increase in the total number of orders in 2017 except for some months such as April, June and December when orders declined. In contrast, 2018, which had more orders on average, saw a steep decline across several months, starting from April down to September, and the biggest decline happened from August to September, where there was a 6,496 difference in order, which means that September only had 16 orders in total.
+
+2. The total order across each year showed a seasonality trend, with 2017 having a peaked period that lasted for a short period from 2017-11-23 to 2017-11-29, with the highest being on 2017-11-24. 
+
+3. The majority of customers used credit card payment option to process their order, about 73.92% of orders, with debit card being used in just 1.47% of the total orders. Across all product categories, the preference for payment method remains the same, with credit card taking the first choice, followed by Boleto, voucher, and debit card. 
+
+4. Looking at the Olist platform active sellers trend chart, the overall total number of sellers was 3,095. The number of active sellers on Olist in 2017 saw less variability than in 2018, which closely relates to the patterns in the amount of order and revenue generated during those periods. In 2016 there were 146 active sellers, in 2017, 1,785 and 2018, 2,384.
+
+5. The satisfaction survey results indicate that 75% of customers gave a rating of 4 and above, indicating a high level of satisfaction with the transaction process. According to the sales summary by review score table, orders with higher ratings score (5, 4) generated more sales than those with low ratings, except for those with 1 rating score, which generated more sales on average and in total than orders with 2 and 3 rating scores. It is also worth noting that there were more rating scores of 1 than 2 and 3. 
+
+6. About 93.6% of sales on Olist were from customers making their first purchase, and only 5.66% of the total sales were generated by repeated customers.
+
